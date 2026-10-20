@@ -9,3 +9,5 @@ artifacts/
 .env*
 !.env.example
 private/
+__pycache__/
+*.pyc

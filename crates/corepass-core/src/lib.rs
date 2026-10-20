@@ -1,6 +1,8 @@
 pub mod logging;
 pub mod model;
 pub mod platform;
+#[cfg(feature = "selfhost")]
+mod selfhost;
 
 use logging::Journal;
 use model::*;
@@ -107,6 +109,8 @@ pub struct App {
     pub closing: AtomicBool,
     pub show_requested: AtomicBool,
     pub quit_requested: AtomicBool,
+    #[cfg(feature = "selfhost")]
+    servers: Arc<selfhost::Service>,
 }
 
 fn read_json(path: &Path) -> Result<Value, String> {
@@ -177,6 +181,12 @@ impl App {
         for p in &profiles.profiles {
             log.register([p.username.clone(), p.password.clone()]);
         }
+        #[cfg(feature = "selfhost")]
+        let servers = {
+            let directory = data.join("selfhost");
+            platform::protect_directory(&directory)?;
+            selfhost::Service::new(directory, log.clone())?
+        };
         platform::restore_proxy(&data)?;
         let app = Arc::new(Self {
             data,
@@ -207,9 +217,14 @@ impl App {
             closing: AtomicBool::new(false),
             show_requested: AtomicBool::new(false),
             quit_requested: AtomicBool::new(false),
+            #[cfg(feature = "selfhost")]
+            servers,
         });
-        app.log
-            .event("info", "APP_READY", "Corepass 0.3 · Rust backend ready");
+        app.log.event(
+            "info",
+            "APP_READY",
+            &format!("Corepass {VERSION} · Rust backend ready"),
+        );
         let a = app.clone();
         std::thread::spawn(move || {
             while !a.closing.load(Ordering::SeqCst) {
@@ -288,8 +303,14 @@ impl App {
                 )
                 .unwrap()),
                 "/v1/openapi.json" => Ok(api_schema()),
+                #[cfg(feature = "selfhost")]
+                "/v1/servers" => self.servers.list().map_err(ApiError::from),
                 _ if path.starts_with("/v1/operations/") => {
                     let id = path.trim_start_matches("/v1/operations/");
+                    #[cfg(feature = "selfhost")]
+                    if id.starts_with("srv_") {
+                        return self.servers.operation(id).map_err(ApiError::from);
+                    }
                     self.state
                         .lock()
                         .unwrap_or_else(|e| e.into_inner())
@@ -304,6 +325,10 @@ impl App {
         }
         if method != "POST" {
             return Err(error(405, "CP-METHOD", "Метод не поддерживается"));
+        }
+        #[cfg(feature = "selfhost")]
+        if path.starts_with("/v1/servers/") {
+            return self.servers.submit(path, body).map_err(ApiError::from);
         }
         let _mutation = self.command_lock.lock().unwrap_or_else(|e| e.into_inner());
         let obj = body.as_object().ok_or("Нужен JSON-объект")?;
@@ -846,6 +871,8 @@ impl App {
             .minimize_to_tray
     }
     fn monitor(&self) {
+        #[cfg(feature = "selfhost")]
+        self.servers.purge_expired();
         if self.busy.load(Ordering::SeqCst) {
             return;
         }
@@ -962,6 +989,51 @@ pub fn api_schema() -> Value {
     ] {
         let entry = paths.entry(path).or_insert(json!({}));
         entry[method] = json!({"summary":summary,"responses":{"200":{"description":"JSON"},"202":{"description":"Асинхронная операция"},"409":{"description":"Занято или работает старый клиент"}},"security":if path=="/health"{json!([])}else{json!([{"localToken":[]}])}});
+    }
+    #[cfg(feature = "selfhost")]
+    for (path, method, summary) in [
+        (
+            "/v1/servers",
+            "get",
+            "Сохранённые серверы без SSH-паролей; без сетевых запросов",
+        ),
+        (
+            "/v1/servers/host-key",
+            "post",
+            "Получить SSH-отпечаток без аутентификации",
+        ),
+        (
+            "/v1/servers/inspect",
+            "post",
+            "Проверить сервер после явного подтверждения SSH-отпечатка",
+        ),
+        (
+            "/v1/servers/install",
+            "post",
+            "Установить по привязанному плану проверки",
+        ),
+        (
+            "/v1/servers/clients/list",
+            "post",
+            "Список клиентов через SSH",
+        ),
+        (
+            "/v1/servers/clients/create",
+            "post",
+            "Создать клиента своего сервера",
+        ),
+        (
+            "/v1/servers/clients/revoke",
+            "post",
+            "Отозвать клиента своего сервера",
+        ),
+        (
+            "/v1/servers/clients/export",
+            "post",
+            "Явный экспорт персональной ссылки; результат живёт пять минут",
+        ),
+    ] {
+        paths.entry(path).or_insert(json!({}))[method] = json!({"summary":summary,"responses":{"200":{"description":"JSON"},"202":{"description":"Асинхронная операция srv_; опрос /v1/operations/{id}"}},"security":[{"localToken":[]}]});
     }
     json!({"openapi":"3.0.3","info":{"title":"Corepass Next Local API","version":VERSION},"servers":[{"url":format!("http://127.0.0.1:{API_PORT}")}],"paths":paths,"components":{"securitySchemes":{"localToken":{"type":"http","scheme":"bearer"}}}})
 }
@@ -1109,6 +1181,36 @@ mod tests {
         let text = fs::read_to_string(report["path"].as_str().unwrap()).unwrap();
         assert!(!text.contains("naive+https"));
         assert!(!text.contains(&app.token));
+        app.shutdown();
+    }
+    #[cfg(feature = "selfhost")]
+    #[test]
+    fn server_inventory_and_rejected_actions_leave_vpn_state_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = App::new(
+            dir.path().join("isolated"),
+            dir.path().join("missing-engine"),
+        )
+        .unwrap();
+        let before = app.request("GET", "/v1/status", json!({})).unwrap();
+        let inventory = app.request("GET", "/v1/servers", json!({})).unwrap();
+        assert_eq!(inventory["servers"], json!([]));
+        assert_eq!(inventory["busy"], false);
+        assert!(app
+            .request("POST", "/v1/servers/exec", json!({"command":"anything"}))
+            .is_err());
+        assert!(app
+            .request(
+                "POST",
+                "/v1/servers/host-key",
+                json!({"host":"bad; command", "ssh_port":22})
+            )
+            .is_err());
+        let after = app.request("GET", "/v1/status", json!({})).unwrap();
+        for key in ["state", "busy", "engine_running", "mode", "profile_id"] {
+            assert_eq!(before[key], after[key]);
+        }
+        assert!(api_schema()["paths"].get("/v1/servers/install").is_some());
         app.shutdown();
     }
 }

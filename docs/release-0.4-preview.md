@@ -1,0 +1,5 @@
+Corepass 0.4 preview adds an animated server setup wizard and client management to the Rust/Tauri Windows app. The wizard uses IP, SSH credentials and a domain, presents the SSH fingerprint before authentication, performs a read-only preflight, then installs only after a separate explicit action. Client links and QR codes can be created and revoked through the same control plane.
+
+Server management runs independently from the local VPN engine. Passwords are not stored; saved inventory contains target metadata and the SSH pin. The initial installer supports clean Ubuntu22.04/24.04 amd64 servers with free ports80/443. Existing Amnezia/S-UI deployments are not migrated automatically.
+
+This is a development preview. Offline Rust tests, frontend build/tests and temporary-directory server simulations are distinct from real VPS installation and native network validation. The user's current Windows client and connectivity were left running during development; no live SSH installation or VPN test was performed for this preview. Keep stable0.3.0 as fallback. OpenWrt hardware validation remains pending separately.
