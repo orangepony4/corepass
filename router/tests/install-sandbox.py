@@ -3,7 +3,7 @@
 This tests installer transactions, not router hardware or the real package manager.
 The real ARM64 executables and SquashFS are checked by the separate native CI job.
 """
-import hashlib, io, os, pathlib, shutil, subprocess, tarfile, tempfile
+import hashlib, io, os, pathlib, re, shutil, subprocess, tarfile, tempfile
 
 ROOT=pathlib.Path(__file__).resolve().parents[2]
 BUSYBOX=pathlib.Path('/usr/bin/busybox')
@@ -19,8 +19,16 @@ def sandbox(case):
     with tempfile.TemporaryDirectory(prefix='corepass-install-test-') as temp:
         root=pathlib.Path(temp)
         (root/'bin').mkdir();shutil.copy2(BUSYBOX,root/'bin/busybox')
-        for applet in ['sh','id','mkdir','chmod','cat','cp','mv','rm','du','awk','grep','tar','sha256sum','mktemp','umount','gzip','gunzip']:
+        for applet in ['id','mkdir','chmod','cat','cp','mv','rm','du','awk','grep','tar','sha256sum','mktemp','umount','gzip','gunzip']:
             (root/'bin'/applet).symlink_to('busybox')
+        # BusyBox's standalone ash bypasses PATH for built-in applets (including df).
+        # Use a POSIX dash shell here so dependency mocks are actually consulted.
+        shutil.copy2('/bin/dash',root/'bin/sh')
+        libraries=subprocess.check_output(['ldd','/bin/dash'],text=True)
+        for library in re.findall(r'/[^\s()]+',libraries):
+            source=pathlib.Path(library)
+            if source.is_file():
+                destination=root/library.lstrip('/');destination.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(source,destination)
         for d in ['tmp','overlay','dev','proc','source','etc/config','etc/steer']:(root/d).mkdir(parents=True,exist_ok=True)
         write(root,'dev/null','')
         write(root,'proc/filesystems','nodev\tproc\n\tsquashfs\n')
