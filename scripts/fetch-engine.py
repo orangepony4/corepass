@@ -1,22 +1,27 @@
-"""Fetch pinned official sing-box archives and verify GitHub's SHA256 asset digest."""
+"""Fetch official pinned binaries without an unauthenticated GitHub API dependency."""
 import hashlib, json, pathlib, sys, tarfile, urllib.request, zipfile
 
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 VERSION='1.14.3'
 TARGETS={'windows':f'sing-box-{VERSION}-windows-amd64.zip','router':f'sing-box-{VERSION}-linux-arm64-musl.tar.gz'}
+SHA256={
+    'windows':'d8b86ef58936dba9230ec6a57ffa4243933f3c14ef4809828b6c553440ed1518',
+    'router':'12d6d67a4edf0dd54590865b1f4f79cd09ae043a02d648e9d1b5fccc8446ee07',
+}
 target=sys.argv[1] if len(sys.argv)>1 else 'windows'
 name=TARGETS[target]
 def get(url):
     return urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'Corepass-build'}),timeout=120)
-with get(f'https://api.github.com/repos/SagerNet/sing-box/releases/tags/v{VERSION}') as r: release=json.load(r)
-asset=next(a for a in release['assets'] if a['name']==name)
-digest=asset.get('digest','')
-if not digest.startswith('sha256:'): raise RuntimeError('Upstream does not provide a SHA256 digest')
+digest='sha256:'+SHA256[target]
+archive_url=f'https://github.com/SagerNet/sing-box/releases/download/v{VERSION}/{name}'
 cache=ROOT/'artifacts'/'downloads';cache.mkdir(parents=True,exist_ok=True)
 archive=cache/name
 if not archive.exists():
-    with get(asset['browser_download_url']) as r,archive.open('wb') as f:
+    partial=archive.with_suffix(archive.suffix+'.part')
+    with get(archive_url) as r,partial.open('wb') as f:
         while data:=r.read(262144): f.write(data)
+    if hashlib.sha256(partial.read_bytes()).hexdigest()!=digest[7:]:raise RuntimeError('Engine download digest mismatch')
+    partial.replace(archive)
 if hashlib.sha256(archive.read_bytes()).hexdigest()!=digest[7:]:raise RuntimeError('Engine archive digest mismatch')
 destination=ROOT/('src-tauri/resources/engine' if target=='windows' else 'artifacts/router-engine')
 destination.mkdir(parents=True,exist_ok=True)
