@@ -16,12 +16,25 @@ if [ -r /usr/lib/corepass/version ]; then
     [ "$(cat /usr/lib/corepass/version)" = "$VERSION" ] && { say 'Эта версия уже установлена. Откройте LuCI → Службы → Corepass.'; exit 0; }
     die 'Обнаружена другая версия Corepass. Обновление действующей установки требует отдельной миграции; ничего не изменено.'
 fi
+[ ! -e /usr/lib/corepass/engine.squashfs ] || die 'Обнаружен незавершённый образ без номера версии. Сначала проверьте /usr/lib/corepass; установщик его не перезаписывает.'
 command -v uclient-fetch >/dev/null || die 'Не найден штатный uclient-fetch.'
 command -v sha256sum >/dev/null || die 'Не найден sha256sum.'
 command -v opkg >/dev/null || die 'Не найден opkg. Требуется стандартный OpenWrt 24.10.'
 stage="$(mktemp -d /tmp/corepass-install.XXXXXX)"
-cleanup() { case "$stage" in /tmp/corepass-install.??????) rm -rf -- "$stage";; esac; }
-trap cleanup EXIT INT TERM
+changed=0
+completed=0
+cleanup() {
+    if [ "$changed" = 1 ] && [ "$completed" = 0 ]; then
+        umount /usr/lib/corepass/runtime 2>/dev/null || true
+        rm -f /usr/lib/corepass/engine.squashfs.new /usr/lib/corepass/engine.squashfs /usr/lib/corepass/version
+        if [ -f "$stage/files" ]; then while IFS= read -r owned; do rm -f "/$owned"; done < "$stage/files"; fi
+        say 'Незавершённые файлы Corepass убраны. Личные настройки и другие службы сохранены.'
+    fi
+    case "$stage" in /tmp/corepass-install.??????) rm -rf -- "$stage";; esac
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 fetch() { uclient-fetch -q -T 45 -O "$stage/$1" "$BASE/$1" || die "Не удалось загрузить $1. Ничего не включалось."; }
 say 'Скачиваем проверяемые файлы релиза…'
 fetch SHA256SUMS
@@ -48,9 +61,12 @@ tar -tvzf "$stage/corepass-openwrt-ui.tar.gz" | awk 'substr($1,1,1)!="-" { bad=1
 say 'Устанавливаем необходимые пакеты OpenWrt…'
 opkg update || die 'Не удалось обновить список пакетов. Настройки сети не менялись.'
 opkg install kmod-loop kmod-tun kmod-nft-queue ca-bundle luci-base rpcd || die 'Не удалось установить зависимости. Не используйте --force-depends: проверьте соответствие ядра и репозитория прошивки.'
+free_kib="$(df -Pk /overlay | awk 'NR==2 {print $4}')"
+[ "$free_kib" -ge "$((image_kib + 4096))" ] || die 'После установки зависимостей недостаточно места для образа и резерва. Corepass не включался.'
 grep -qw squashfs /proc/filesystems || die 'Ядро не поддерживает SquashFS.'
 mkdir -p /usr/lib/corepass/runtime /etc/corepass
 chmod 700 /etc/corepass
+changed=1
 cp "$stage/corepass-openwrt-arm64.squashfs" /usr/lib/corepass/engine.squashfs.new
 mv /usr/lib/corepass/engine.squashfs.new /usr/lib/corepass/engine.squashfs
 tar -xzf "$stage/corepass-openwrt-ui.tar.gz" -C /
@@ -58,10 +74,12 @@ chmod 755 /etc/init.d/corepass /usr/libexec/rpcd/corepass /usr/libexec/corepass/
 [ -e /etc/corepass/settings.json ] || printf '%s\n' '{"enabled":false,"subscription":"","devices":[],"lan_interface":"br-lan"}' > /etc/corepass/settings.json
 /usr/libexec/corepass/mount-engine || die 'Не удалось смонтировать образ движка. Сеть не переключалась.'
 /usr/lib/corepass/runtime/corepass-router list >/dev/null || die 'Не удалось запустить управляющий модуль. Сеть не переключалась.'
-printf '%s\n' "$VERSION" > /usr/lib/corepass/version
+/usr/lib/corepass/runtime/corepass-router install-disabled >/dev/null || die 'Не удалось безопасно сохранить выключенное состояние.'
 /etc/init.d/corepass disable
 # Reload only the RPC plugin registry, never network/firewall/DNS or other VPN services.
 /etc/init.d/rpcd restart
+printf '%s\n' "$VERSION" > /usr/lib/corepass/version
+completed=1
 say 'Готово. LuCI → Службы → Corepass.'
 say 'Corepass выключен. Добавьте HTTPS-подписку и выберите одно тестовое устройство.'
 say 'Steer, WARP, AmneziaWG, DNS и настройки Zapret Manager не изменялись.'

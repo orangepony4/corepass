@@ -1,1 +1,1 @@
-{"identifier":"default","description":"Local application window only","windows":["main"],"permissions":["core:default"]}
+{"identifier":"default","description":"Local application window only","windows":["main"],"permissions":["core:default",{"identifier":"opener:allow-open-url","allow":[{"url":"https://github.com/orangepony4/corepass"}]}]}

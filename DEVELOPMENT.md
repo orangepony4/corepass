@@ -1,14 +1,13 @@
-# Corepass Next
+# Development and verification
 
-## Scope
+The desktop and router controllers share a fixed-schema Naive HTTPS profile parser. Subscription-provided routing, DNS, executable paths and inbound configuration are discarded.
 
-1. Rust + Tauri 2 Windows application, React/TypeScript UI, existing official sing-box engine.
-2. Independent app data and ports; read-only detection of Corepass 0.2. Never stop or reconfigure the active client during development.
-3. OpenWrt package for Cudy WR3000S v1 / 24.10: lightweight LuCI UI, disabled on installation, preserve Steer/WARP/DoH/AWG.
-4. GitHub source, tested release artifacts, one-command router installation with checksum verification.
+Windows data and ports are independent of Corepass 0.2. Detection of the older API prevents activation of a second VPN. Test import and API behavior before any network-changing checks. Preserve the original client as a fallback.
 
-## Verification boundary
+Run `cargo test -p corepass-core -p corepass-router`, `npm test`, and `npm run build`. Native Windows checks must additionally exercise system proxy restoration, process termination recovery and real HTTPS through TUN.
 
-Windows networking activation must not be tested while the user watches a film through Corepass 0.2.
-Router firmware/hardware has not been accessed; installer and runtime need offline tests before publishing and a real-device validation later.
-No private profiles, subscription links, API tokens, server access details or local logs belong in this repository.
+The GitHub workflow builds on Windows and native ARM64 Linux. Router checks include a static-musl controller, actual sing-box configuration validation, and execution from the mounted read-only SquashFS image. The installer archive has an explicit regular-file allowlist and never contains private settings.
+
+Hardware checks on the Cudy remain a separate step: available memory under load, selected-device IPv4/IPv6/DNS routing, exclusion of other devices, reboot recovery, and coexistence with the installed firewall rules. Do not equate a successful ARM64 build with a completed router hardware test.
+
+Never commit private profiles, subscription URLs, API tokens, access details, local application data or diagnostic reports.

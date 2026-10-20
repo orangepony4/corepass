@@ -2,6 +2,7 @@ node_modules/
 dist/
 target/
 src-tauri/resources/engine/
+src-tauri/gen/
 artifacts/
 *.log
 *.key
