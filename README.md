@@ -1,5 +1,57 @@
 # Corepass
 
-Rust + Tauri 2 Windows VPN client and lightweight OpenWrt module.
+Личный VPN-клиент для Windows на **Rust + Tauri 2** и модуль управления для **OpenWrt**.
 
-The implementation and verified installation packages are being prepared.
+## Windows
+
+Corepass Next использует официальный sing-box как отдельный процесс. Интерфейс: React + TypeScript, локальная сборка без удалённых страниц и телеметрии.
+
+- Naive HTTPS: импорт ссылки или HTTPS-подписки S-UI.
+- Системный прокси, весь компьютер (TUN, нужны права администратора), локальный прокси.
+- Проверка реального HTTPS-маршрута перед статусом «Подключено».
+- Локальный API, постоянный журнал с ротацией и удалением паролей из сообщений.
+- Windows Job Object завершает только свой движок; отдельный процесс восстанавливает собственные настройки прокси при аварии.
+- Профили старого Corepass можно **скопировать** кнопкой «Из старого Corepass». Исходные файлы не меняются.
+- Corepass 0.2 и Next используют разные папки и порты. Пока старый клиент запущен, подключение Next заблокировано.
+
+Данные Next: `%LOCALAPPDATA%\CorepassNext`. API: `http://127.0.0.1:17871`. Прокси: `127.0.0.1:17872`.
+
+## Роутер OpenWrt
+
+Модуль ориентирован на **Cudy WR3000S v1, OpenWrt 24.10, aarch64_cortex-a53 / mediatek-filogic**.
+Устанавливается отключённым. Перед включением нужно добавить подписку и выбрать IP тестового устройства в LuCI → Службы → Corepass.
+
+Установщик и точная команда будут опубликованы вместе с проверенным релизом. Не используйте команду из стороннего источника: смотрите этот README и Releases.
+
+Установка не должна удалять или перенастраивать Zapret Manager, Steer, WARP, AmneziaWG и DNS. Совместимость правил требуется проверить на конкретном устройстве. Реальная производительность зависит от процессора, памяти, провайдера и сервера.
+
+## Сборка Windows
+
+Требуются Node.js 22+, Rust stable MSVC, Microsoft C++ Build Tools с Windows SDK, WebView2.
+
+```powershell
+npm ci
+python scripts/fetch-engine.py windows
+cargo test -p corepass-core
+npm run build
+npm run tauri build -- --no-bundle
+```
+
+Для переносимого каталога используйте `scripts/build-windows.ps1`. В нём должны находиться `Corepass-Next.exe` и каталог `engine/`.
+
+## Локальный API
+
+Токен читается из защищённого файла `api-token` в папке Next. Передавайте его в `Authorization: Bearer …`.
+Браузерные запросы с Origin/Sec-Fetch-Site и чужим Host отклоняются. API не принимает команды оболочки, пути к исполняемым файлам и произвольные конфигурации sing-box.
+
+```powershell
+$token = (Get-Content "$env:LOCALAPPDATA\CorepassNext\api-token" -Raw).Trim()
+Invoke-RestMethod http://127.0.0.1:17871/v1/status -Headers @{Authorization="Bearer $token"}
+```
+
+Полная схема: `GET /v1/openapi.json` с токеном. Длительные команды возвращают `operation_id`; результат: `GET /v1/operations/{id}`.
+
+## Лицензии
+
+Исходный код Corepass — MIT. Внешний движок sing-box и библиотеки имеют собственные лицензии: [THIRD-PARTY.md](THIRD-PARTY.md).
+Личные ссылки подписок и пароли не входят в этот репозиторий и релизы.
