@@ -1,0 +1,1 @@
+{"config":{"devices":["AA:BB:CC:DD:EE:FF"],"lan_interface":"br-lan"},"profile":{"id":"fixture","name":"Test","server":"example.com","port":443,"username":"test-user","password":"fixture-password","country":"Test"}}

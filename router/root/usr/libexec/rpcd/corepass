@@ -1,0 +1,3 @@
+#!/bin/sh
+/usr/libexec/corepass/mount-engine || exit 1
+exec /usr/lib/corepass/runtime/corepass-router "$@"

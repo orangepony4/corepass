@@ -17,6 +17,7 @@ pub fn atomic_json(path:&Path,value:&Value)->Result<(),String> {
     #[cfg(not(windows))] fs::rename(tmp,path).map_err(|_|"Ошибка атомарного сохранения настроек")?;
     Ok(())
 }
+#[derive(Debug)]
 pub struct ApiError {pub status:u16,pub code:String,pub message:String}
 impl From<String> for ApiError {fn from(message:String)->Self{Self{status:400,code:"CP-REQUEST".into(),message}}}
 impl From<&str> for ApiError {fn from(message:&str)->Self{message.to_string().into()}}
@@ -31,7 +32,7 @@ struct State {
 }
 pub struct App {
     pub data:PathBuf,pub engine_path:PathBuf,pub log:Arc<Journal>,pub token:String,
-    state:Mutex<State>,busy:AtomicBool,cancel:AtomicBool,pub closing:AtomicBool,
+    state:Mutex<State>,command_lock:Mutex<()>,busy:AtomicBool,cancel:AtomicBool,pub closing:AtomicBool,
     pub show_requested:AtomicBool,
 }
 
@@ -55,7 +56,7 @@ impl App {
         let settings:Settings=if data.join("settings.json").exists(){serde_json::from_value(read_json(&data.join("settings.json"))?).map_err(|_|"Повреждены настройки")?}else{Settings::default()};
         log.register([token.clone(),profiles.subscription_url.clone()]);for p in &profiles.profiles{log.register([p.username.clone(),p.password.clone()]);}
         platform::restore_proxy(&data)?;
-        let app=Arc::new(Self{data,engine_path,log,state:Mutex::new(State{profiles,settings,engine:None,started:None,status:"disconnected".into(),message:"Готов к подключению".into(),exit_ip:None,latency:None,last_error:None,checks:vec![],operations:vec![],upload:0,download:0,upload_rate:0,download_rate:0,history:vec![]}),token,busy:AtomicBool::new(false),cancel:AtomicBool::new(false),closing:AtomicBool::new(false),show_requested:AtomicBool::new(false)});
+        let app=Arc::new(Self{data,engine_path,log,state:Mutex::new(State{profiles,settings,engine:None,started:None,status:"disconnected".into(),message:"Готов к подключению".into(),exit_ip:None,latency:None,last_error:None,checks:vec![],operations:vec![],upload:0,download:0,upload_rate:0,download_rate:0,history:vec![]}),command_lock:Mutex::new(()),token,busy:AtomicBool::new(false),cancel:AtomicBool::new(false),closing:AtomicBool::new(false),show_requested:AtomicBool::new(false)});
         app.log.event("info","APP_READY","Corepass 0.3 · Rust backend ready");
         let a=app.clone();std::thread::spawn(move||{while !a.closing.load(Ordering::SeqCst){std::thread::sleep(Duration::from_secs(2));a.monitor();}});
         Ok(app)
@@ -82,6 +83,7 @@ impl App {
             _ if path.starts_with("/v1/operations/")=>{let id=path.trim_start_matches("/v1/operations/");self.state.lock().unwrap_or_else(|e|e.into_inner()).operations.iter().find(|v|v["id"]==id).cloned().ok_or(error(404,"CP-NOT-FOUND","Операция не найдена"))},
             _=>Err(error(404,"CP-NOT-FOUND","Маршрут не найден"))};}
         if method!="POST" {return Err(error(405,"CP-METHOD","Метод не поддерживается"));}
+        let _mutation=self.command_lock.lock().unwrap_or_else(|e|e.into_inner());
         let obj=body.as_object().ok_or("Нужен JSON-объект")?;
         let allowed:&[&str]=match path {"/v1/profiles/import"=>&["uri"],"/v1/profiles/subscribe"=>&["url"],"/v1/profiles/select"=>&["profile_id"],"/v1/settings"=>&["mode","minimize_to_tray"],"/v1/connect"=>&["mode"],_=>&[]};
         if obj.keys().any(|key|!allowed.contains(&key.as_str())){return Err("Неизвестные параметры команды".into());}
@@ -110,6 +112,7 @@ impl App {
     }
     fn submit(self:&Arc<Self>,path:&str,body:Value)->ApiResult {
         if path=="/v1/connect" && legacy_present(){return Err(error(409,"CP-LEGACY-ACTIVE","Старый Corepass работает. Новое подключение заблокировано, чтобы сохранить текущую сеть"));}
+        if path=="/v1/connect"&&self.state.lock().unwrap_or_else(|e|e.into_inner()).engine.is_some(){return Err(error(409,"CP-ALREADY-CONNECTED","Новая версия уже подключена"));}
         if self.busy.compare_exchange(false,true,Ordering::SeqCst,Ordering::SeqCst).is_err(){return Err(error(409,"CP-BUSY","Выполняется другая операция"));}
         let id=uuid::Uuid::new_v4().simple().to_string();self.cancel.store(false,Ordering::SeqCst);
         {let mut s=self.state.lock().unwrap_or_else(|e|e.into_inner());if s.operations.len()>=20{s.operations.remove(0);}s.operations.push(json!({"id":id,"action":path,"state":"running"}));}
@@ -184,7 +187,7 @@ impl App {
         let _=fs::remove_file(self.data.join("runtime.json"));
         let mut s=self.state.lock().unwrap_or_else(|e|e.into_inner());s.started=None;s.status="disconnected".into();s.message="Готов к подключению".into();s.exit_ip=None;s.latency=None;s.upload_rate=0;s.download_rate=0;
     }
-    pub fn shutdown(&self){self.closing.store(true,Ordering::SeqCst);self.cancel.store(true,Ordering::SeqCst);self.stop_engine();}
+    pub fn shutdown(&self){self.closing.store(true,Ordering::SeqCst);self.cancel.store(true,Ordering::SeqCst);let deadline=Instant::now()+Duration::from_secs(15);while self.busy.load(Ordering::SeqCst)&&Instant::now()<deadline{std::thread::sleep(Duration::from_millis(50));}self.stop_engine();}
     pub fn minimize_to_tray(&self)->bool{self.state.lock().unwrap_or_else(|e|e.into_inner()).settings.minimize_to_tray}
     fn monitor(&self){
         if self.busy.load(Ordering::SeqCst){return;}
@@ -192,7 +195,7 @@ impl App {
         if dead{self.stop_engine();let mut s=self.state.lock().unwrap_or_else(|e|e.into_inner());s.status="error".into();s.message="Движок остановился. Откройте журнал".into();self.log.event("error","CP-ENGINE-EXIT","Движок неожиданно завершился; настройки прокси восстановлены");}
     }
     fn metrics(&self,secret:String){
-        let client=match http_client(false){Ok(c)=>c,Err(_)=>return};let response=match client.get(format!("http://127.0.0.1:{METRICS_PORT}/traffic")).bearer_auth(secret).send(){Ok(r)=>r,Err(_)=>return};
+        let client=match reqwest::blocking::Client::builder().no_proxy().connect_timeout(Duration::from_secs(2)).timeout(Duration::from_secs(604800)).build(){Ok(c)=>c,Err(_)=>return};let response=match client.get(format!("http://127.0.0.1:{METRICS_PORT}/traffic")).bearer_auth(secret).send(){Ok(r)=>r,Err(_)=>return};
         let mut last=Instant::now();for line in BufReader::new(response).lines().map_while(Result::ok){if self.closing.load(Ordering::SeqCst){break;}if let Ok(v)=serde_json::from_str::<Value>(&line){let mut s=self.state.lock().unwrap_or_else(|e|e.into_inner());if s.engine.is_none(){break;}
             // Clash /traffic reports byte rates, not lifetime counters.
             let seconds=last.elapsed().as_secs_f64();last=Instant::now();s.download_rate=v["down"].as_u64().unwrap_or(0);s.upload_rate=v["up"].as_u64().unwrap_or(0);s.download+=(s.download_rate as f64*seconds)as u64;s.upload+=(s.upload_rate as f64*seconds)as u64;
@@ -216,7 +219,7 @@ pub fn start_api(app:Arc<App>)->Result<(),String>{
     std::thread::spawn(move||{while !app.closing.load(Ordering::SeqCst){let request=match server.recv_timeout(Duration::from_millis(250)){Ok(Some(r))=>r,_=>continue};let a=app.clone();std::thread::spawn(move||serve_request(a,request));}});Ok(())
 }
 fn serve_request(app:Arc<App>,mut req:tiny_http::Request){
-    let header=|name:&str|req.headers().iter().find(|h|h.field.equiv(name)).map(|h|h.value.as_str().to_owned());
+    let header=|name:&'static str|req.headers().iter().find(|h|h.field.equiv(name)).map(|h|h.value.as_str().to_owned());
     let result:ApiResult=if header("Host")!=Some(format!("127.0.0.1:{API_PORT}"))||header("Origin").is_some()||header("Sec-Fetch-Site").is_some(){Err(error(403,"CP-LOCAL-ONLY","API доступен только локальным приложениям"))}
     else if req.url()!="/health"&&!constant_equal(&header("Authorization").unwrap_or_default(),&format!("Bearer {}",app.token)){Err(error(401,"CP-AUTH","Требуется локальный Bearer-токен"))}
     else if req.body_length().unwrap_or(0)>16_384{Err(error(413,"CP-SIZE","Максимум 16 КБ"))}

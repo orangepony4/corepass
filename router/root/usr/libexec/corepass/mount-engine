@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+image=/usr/lib/corepass/engine.squashfs
+target=/usr/lib/corepass/runtime
+[ -f "$image" ] || { echo 'Corepass: engine image is missing' >&2; exit 1; }
+if grep -q " $target squashfs " /proc/mounts; then exit 0; fi
+mkdir -p "$target"
+modprobe loop 2>/dev/null || true
+mount -t squashfs -o loop,ro "$image" "$target"

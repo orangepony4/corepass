@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 export type Profile={id:string;name:string;server:string;port:number;country:string;selected:boolean;protocol:string};
 export type Event={time:string;level:string;code:string;message:string};
 export type Status={version:string;state:string;message:string;busy:boolean;mode:string;profile_id:string;engine_running:boolean;engine_available:boolean;legacy_active:boolean;is_admin:boolean;uptime_seconds:number;exit_ip:string|null;latency_ms:number|null;last_error:{code:string;message:string}|null;download_bytes:number;upload_bytes:number;download_rate:number;upload_rate:number;history:{down:number;up:number}[];diagnostics:{host:string;status:string;latency_ms?:number;error?:string}[];api_url:string;token_path:string;data_dir:string};
-export const native=Boolean('__TAURI_INTERNALS__' in window);
+export const native=typeof window!=='undefined'&&Boolean('__TAURI_INTERNALS__' in window);
 export const initial:Status={version:'0.3.0',state:'disconnected',message:'Готов к подключению',busy:false,mode:'system',profile_id:'',engine_running:false,engine_available:false,legacy_active:false,is_admin:false,uptime_seconds:0,exit_ip:null,latency_ms:null,last_error:null,download_bytes:0,upload_bytes:0,download_rate:0,upload_rate:0,history:[],diagnostics:[],api_url:'http://127.0.0.1:17871',token_path:'%LOCALAPPDATA%\\CorepassNext\\api-token',data_dir:'%LOCALAPPDATA%\\CorepassNext'};
 export async function api<T>(method:string,path:string,body:object={}):Promise<T>{
   if(!native){if(method==='GET'){if(path==='/v1/status')return initial as T;if(path==='/v1/profiles')return {profiles:[]} as T;if(path==='/v1/logs')return {events:[]} as T;}throw new Error('Это предпросмотр интерфейса. Откройте настольное приложение.');}

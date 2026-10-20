@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/corepass-core", "src-tauri"]
+members = ["crates/corepass-core", "crates/corepass-router", "src-tauri"]
 resolver = "2"
 
 [profile.release]

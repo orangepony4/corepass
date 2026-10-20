@@ -1,0 +1,1 @@
+{"admin/services/corepass":{"title":"Corepass","order":55,"action":{"type":"view","path":"corepass"},"depends":{"acl":["luci-app-corepass"]}}}

@@ -66,7 +66,7 @@ pub fn restore_proxy(data:&Path)->Result<(),String> {
     #[cfg(windows)] {
         use winreg::{RegKey,RegValue,enums::*};
         let key=RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(r"Software\Microsoft\Windows\CurrentVersion\Internet Settings",KEY_READ|KEY_WRITE).map_err(|_|"Не удалось восстановить прокси")?;
-        let owns=key.get_value::<String,_>("ProxyServer").unwrap_or_default()==format!("127.0.0.1:{}",crate::model::PROXY_PORT) && key.get_value::<u32,_>("ProxyEnable").unwrap_or(0)==1;
+        let owns=key.get_value::<String,_>("ProxyServer").unwrap_or_default()==format!("127.0.0.1:{}",crate::model::PROXY_PORT);
         if owns {
             let old:Value=serde_json::from_slice(&fs::read(&path).map_err(|_|"Не читается снимок прокси")?).map_err(|_|"Повреждён снимок прокси")?;
             for name in ["ProxyEnable","ProxyServer","ProxyOverride"] {
@@ -86,7 +86,7 @@ pub fn prepare_tun(config:&mut Value,p:&crate::model::Profile)->Result<(),String
     config["outbounds"][0]["server"]=json!(ip);
     config["inbounds"][1]["route_exclude_address"]=json!([format!("{ip}/32")]);
     #[cfg(windows)] {
-        let script="$ErrorActionPreference='Stop'; $p=Get-NetAdapter -Physical | Where-Object Status -eq 'Up' | Select-Object -ExpandProperty ifIndex; Get-NetIPConfiguration | Where-Object { $_.InterfaceIndex -in $p -and $_.IPv4DefaultGateway } | Sort-Object InterfaceIndex | Select-Object -First 1 -ExpandProperty InterfaceAlias";
+        let script="$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); $p=Get-NetAdapter -Physical | Where-Object Status -eq 'Up' | Select-Object -ExpandProperty ifIndex; Get-NetIPConfiguration | Where-Object { $_.InterfaceIndex -in $p -and $_.IPv4DefaultGateway } | Sort-Object InterfaceIndex | Select-Object -First 1 -ExpandProperty InterfaceAlias";
         let mut child=quiet(Command::new("powershell.exe").args(["-NoProfile","-NonInteractive","-Command",script]).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null())).spawn().map_err(|_|"Не удалось найти сетевой адаптер")?;
         wait_child(&mut child,8)?;
         use std::io::Read;let mut bytes=vec![];if let Some(mut out)=child.stdout.take(){let _=out.read_to_end(&mut bytes);}

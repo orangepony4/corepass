@@ -20,6 +20,7 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: python scripts/fetch-engine.py windows
       - run: cargo test -p corepass-core --locked
+      - run: npm test
       - run: npm run tauri build -- --no-bundle
       - name: Package portable app
         shell: pwsh
@@ -35,3 +36,78 @@ jobs:
           name: Corepass-Windows
           path: artifacts/Corepass-0.3.0-windows-x64.zip
           retention-days: 14
+  router:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - name: Install native ARM64 build tools
+        run: sudo apt-get update -qq && sudo apt-get install -y musl-tools squashfs-tools
+      - run: cargo test -p corepass-core -p corepass-router --locked
+      - name: Build static router controller
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+          CC_aarch64_unknown_linux_musl: musl-gcc
+        run: cargo build -p corepass-router --release --target aarch64-unknown-linux-musl --locked
+      - run: python3 scripts/fetch-engine.py router
+      - name: Validate actual engine and configuration
+        run: |
+          target/aarch64-unknown-linux-musl/release/corepass-router render < router/tests/render-input.json > artifacts/router-test.json
+          artifacts/router-engine/sing-box check -c artifacts/router-test.json
+          file target/aarch64-unknown-linux-musl/release/corepass-router artifacts/router-engine/sing-box
+      - name: Build compressed runtime and test read-only execution
+        run: |
+          mkdir -p artifacts/runtime
+          cp artifacts/router-engine/sing-box artifacts/router-engine/LICENSE artifacts/runtime/
+          cp target/aarch64-unknown-linux-musl/release/corepass-router artifacts/runtime/
+          mksquashfs artifacts/runtime artifacts/corepass-openwrt-arm64.squashfs -comp xz -b 262144 -noappend -all-root -no-xattrs
+          test "$(stat -c %s artifacts/corepass-openwrt-arm64.squashfs)" -le 29360128
+          mkdir -p artifacts/mounted
+          sudo mount -t squashfs -o loop,ro artifacts/corepass-openwrt-arm64.squashfs artifacts/mounted
+          artifacts/mounted/corepass-router render < router/tests/render-input.json > artifacts/mounted-test.json
+          artifacts/mounted/sing-box check -c artifacts/mounted-test.json
+          sudo umount artifacts/mounted
+      - name: Build UI archive and validate installer
+        run: |
+          python3 scripts/package-router.py
+          python3 router/tests/check-installer.py
+          sh -n router/install.sh
+          sh -n router/root/etc/init.d/corepass
+          sh -n router/root/usr/libexec/corepass/mount-engine
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Corepass-OpenWrt
+          path: |
+            artifacts/corepass-openwrt-arm64.squashfs
+            artifacts/corepass-openwrt-ui.tar.gz
+            router/install.sh
+          retention-days: 14
+  release:
+    if: contains(github.event.head_commit.message, '[release]')
+    needs: [windows, router]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Corepass-Windows
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: Corepass-OpenWrt
+          path: router-release
+      - name: Assemble checksums and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          find router-release -type f -name 'corepass-openwrt-*' -exec cp {} release/ \;
+          cp router/install.sh release/install.sh
+          cd release
+          sha256sum Corepass-0.3.0-windows-x64.zip corepass-openwrt-arm64.squashfs corepass-openwrt-ui.tar.gz install.sh > SHA256SUMS
+          gh release create v0.3.0 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Corepass 0.3.0 · Rust + Tauri / OpenWrt" --notes-file ../docs/release-0.3.0.md ./*

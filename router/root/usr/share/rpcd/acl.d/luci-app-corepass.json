@@ -1,0 +1,1 @@
+{"luci-app-corepass":{"description":"Corepass VPN control","read":{"ubus":{"corepass":["status","get_config","logs","check"]}},"write":{"ubus":{"corepass":["save","start","stop"]}}}}
