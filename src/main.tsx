@@ -31,6 +31,7 @@ import {
   Lock,
   ExternalLink,
   Server,
+  PanelTop,
 } from "lucide-react";
 import {
   api,
@@ -44,13 +45,22 @@ import {
   type Event,
 } from "./api";
 import { SelfHost } from "./SelfHost";
+import { SuiPanel } from "./SuiPanel";
 import { runOperation } from "./server-api";
 import "./style.css";
 type Page =
-  "home" | "selfhost" | "profiles" | "logs" | "api" | "router" | "settings";
+  | "home"
+  | "selfhost"
+  | "sui"
+  | "profiles"
+  | "logs"
+  | "api"
+  | "router"
+  | "settings";
 const tabs: { id: Page; name: string; icon: typeof Shield }[] = [
   { id: "home", name: "Подключение", icon: Shield },
   { id: "selfhost", name: "Мой сервер", icon: Server },
+  { id: "sui", name: "Панель S-UI", icon: PanelTop },
   { id: "profiles", name: "Подключения", icon: Layers },
   { id: "logs", name: "Журнал", icon: Activity },
   { id: "api", name: "Локальный API", icon: Terminal },
@@ -84,8 +94,11 @@ Invoke-RestMethod http://127.0.0.1:17871/v1/status -Headers @{
 
 function App() {
   const [page, setPage] = useState<Page>(() =>
-      !native && new URLSearchParams(location.search).get("page") === "selfhost"
-        ? "selfhost"
+      !native &&
+      ["selfhost", "sui"].includes(
+        new URLSearchParams(location.search).get("page") || "",
+      )
+        ? (new URLSearchParams(location.search).get("page") as Page)
         : "home",
     ),
     [status, setStatus] = useState<Status>(initial),
@@ -95,6 +108,7 @@ function App() {
     [error, setError] = useState(""),
     [pending, setPending] = useState(false),
     [serverBusy, setServerBusy] = useState(false),
+    [suiBusy, setSuiBusy] = useState(false),
     [modal, setModal] = useState(false),
     [importMode, setImportMode] = useState<"uri" | "url">("url"),
     [input, setInput] = useState(""),
@@ -206,6 +220,13 @@ function App() {
             >
               <t.icon size={18} />
               {t.name}
+              {t.id === "sui" && suiBusy && (
+                <RefreshCw
+                  size={12}
+                  className="sh-spinner nav-operation"
+                  aria-label="Запрос к панели выполняется"
+                />
+              )}
               {t.id === "selfhost" && serverBusy && (
                 <RefreshCw
                   size={12}
@@ -256,6 +277,7 @@ function App() {
                     home: "Надёжное соединение начинается с понятных деталей.",
                     selfhost:
                       "Настройте свой VPN и управляйте доступом устройств.",
+                    sui: "Клиенты и профили вашей установленной S-UI.",
                     profiles: "Профили и подписки для подключения к VPN.",
                     logs: "Что происходит с подключением — без догадок.",
                     api: "Управляйте Corepass из скриптов и других приложений.",
@@ -317,6 +339,20 @@ function App() {
               }
               onNotice={setNotice}
               onBusyChange={setServerBusy}
+            />
+          </div>
+          <div hidden={page !== "sui"}>
+            <SuiPanel
+              active={page === "sui"}
+              onImport={(uri) =>
+                command(
+                  "/v1/profiles/import",
+                  { uri },
+                  "Профиль добавлен в подключения",
+                )
+              }
+              onNotice={setNotice}
+              onBusyChange={setSuiBusy}
             />
           </div>
           {page === "home" && (

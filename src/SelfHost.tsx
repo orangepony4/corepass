@@ -986,7 +986,7 @@ function InlineError({ text }: { text: string }) {
     </div>
   );
 }
-function Dialog({
+export function Dialog({
   active,
   title,
   onClose,
@@ -1228,7 +1228,7 @@ function AccessDialog({
     </Dialog>
   );
 }
-function ShareDialog({
+export function ShareDialog({
   active,
   client,
   onClose,

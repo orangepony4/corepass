@@ -21,8 +21,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: npm ci --no-audit --no-fund
       - run: python scripts/fetch-engine.py windows
-      - run: cargo test -p corepass-core --features selfhost --locked
+      - run: cargo test -p corepass-core --features selfhost,sui --locked
       - run: cargo test -p corepass-selfhost --locked
+      - run: cargo test -p corepass-sui --locked
       - run: npm test
       - run: npm run tauri build -- --no-bundle
       - name: Package portable app

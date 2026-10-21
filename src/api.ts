@@ -81,6 +81,8 @@ export async function api<T>(
       if (path === "/v1/status") return initial as T;
       if (path === "/v1/profiles") return { profiles: [] } as T;
       if (path === "/v1/logs") return { events: [] } as T;
+      if (path === "/v1/sui/panels")
+        return { panels: [], supported: true } as T;
       if (path === "/v1/settings")
         return { minimize_to_tray: true, mode: "system" } as T;
       if (path === "/v1/servers")

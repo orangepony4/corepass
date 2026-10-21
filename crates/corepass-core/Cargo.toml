@@ -1,12 +1,13 @@
 [package]
 name = "corepass-core"
-version = "0.4.0-preview.1"
+version = "0.4.0-preview.2"
 edition = "2021"
 license = "MIT"
 
 [features]
 default = []
 selfhost = ["dep:corepass-selfhost", "dep:zeroize"]
+sui = ["dep:corepass-sui", "dep:zeroize"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -20,11 +21,12 @@ base64 = "0.22"
 regex = "1"
 tiny_http = "0.12"
 corepass-selfhost = { path = "../corepass-selfhost", optional = true }
+corepass-sui = { path = "../corepass-sui", optional = true }
 zeroize = { version = "1", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security", "Win32_Networking_WinInet", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security", "Win32_Security_Credentials", "Win32_Networking_WinInet", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [dev-dependencies]
 tempfile = "3"
