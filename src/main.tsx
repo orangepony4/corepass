@@ -30,6 +30,8 @@ import {
   Wifi,
   Lock,
   ExternalLink,
+  Server,
+  PanelTop,
 } from "lucide-react";
 import {
   api,
@@ -42,11 +44,24 @@ import {
   type Profile,
   type Event,
 } from "./api";
+import { SelfHost } from "./SelfHost";
+import { SuiPanel } from "./SuiPanel";
+import { runOperation } from "./server-api";
 import "./style.css";
-type Page = "home" | "profiles" | "logs" | "api" | "router" | "settings";
+type Page =
+  | "home"
+  | "selfhost"
+  | "sui"
+  | "profiles"
+  | "logs"
+  | "api"
+  | "router"
+  | "settings";
 const tabs: { id: Page; name: string; icon: typeof Shield }[] = [
   { id: "home", name: "Подключение", icon: Shield },
-  { id: "profiles", name: "Серверы", icon: Layers },
+  { id: "selfhost", name: "Мой сервер", icon: Server },
+  { id: "sui", name: "Панель S-UI", icon: PanelTop },
+  { id: "profiles", name: "Подключения", icon: Layers },
   { id: "logs", name: "Журнал", icon: Activity },
   { id: "api", name: "Локальный API", icon: Terminal },
   { id: "router", name: "Роутер", icon: Router },
@@ -78,13 +93,22 @@ Invoke-RestMethod http://127.0.0.1:17871/v1/status -Headers @{
 }`;
 
 function App() {
-  const [page, setPage] = useState<Page>("home"),
+  const [page, setPage] = useState<Page>(() =>
+      !native &&
+      ["selfhost", "sui"].includes(
+        new URLSearchParams(location.search).get("page") || "",
+      )
+        ? (new URLSearchParams(location.search).get("page") as Page)
+        : "home",
+    ),
     [status, setStatus] = useState<Status>(initial),
     [profiles, setProfiles] = useState<Profile[]>([]),
     [events, setEvents] = useState<Event[]>([]),
     [notice, setNotice] = useState(""),
     [error, setError] = useState(""),
     [pending, setPending] = useState(false),
+    [serverBusy, setServerBusy] = useState(false),
+    [suiBusy, setSuiBusy] = useState(false),
     [modal, setModal] = useState(false),
     [importMode, setImportMode] = useState<"uri" | "url">("url"),
     [input, setInput] = useState(""),
@@ -133,25 +157,7 @@ function App() {
     setError("");
     setPending(true);
     try {
-      const result = await api<{ operation_id?: string; path?: string }>(
-        "POST",
-        path,
-        body,
-      );
-      if (result.operation_id) {
-        for (let i = 0; i < 100; i++) {
-          await new Promise((r) => setTimeout(r, 350));
-          const op = await api<{ state: string; error?: string }>(
-            "GET",
-            `/v1/operations/${result.operation_id}`,
-          );
-          if (op.state === "failed" || op.state === "cancelled")
-            throw new Error(op.error || "Операция отменена");
-          if (op.state === "succeeded") break;
-          if (i === 99)
-            throw new Error("Операция ещё выполняется. Проверьте журнал.");
-        }
-      }
+      const result = await runOperation<{ path?: string }>(path, body);
       setNotice(result.path ? `Отчёт сохранён: ${result.path}` : success);
       await refresh();
       return true;
@@ -214,6 +220,20 @@ function App() {
             >
               <t.icon size={18} />
               {t.name}
+              {t.id === "sui" && suiBusy && (
+                <RefreshCw
+                  size={12}
+                  className="sh-spinner nav-operation"
+                  aria-label="Запрос к панели выполняется"
+                />
+              )}
+              {t.id === "selfhost" && serverBusy && (
+                <RefreshCw
+                  size={12}
+                  className="sh-spinner nav-operation"
+                  aria-label="Операция на сервере выполняется"
+                />
+              )}
               {page === t.id && <span className="nav-dot" />}
             </button>
           ))}
@@ -221,7 +241,7 @@ function App() {
         <div className="sidebar-bottom">
           <div className="build-card">
             <span className="small-dot" /> Личный VPN
-            <span className="version">0.3</span>
+            <span className="version">0.4 preview</span>
           </div>
           <p>
             Приватный доступ.
@@ -229,7 +249,7 @@ function App() {
             Понятное управление.
           </p>
           <div className="local-label">
-            <Lock size={12} /> Всё хранится на устройстве
+            <Lock size={12} /> Без облачной панели
           </div>
         </div>
       </aside>
@@ -247,7 +267,7 @@ function App() {
           </div>
         </header>
         <div className="content">
-          <div className="page-heading">
+          <div className="page-heading page-transition" key={page}>
             <div>
               <div className="eyebrow">ВАШ ИНТЕРНЕТ. ВАШИ ПРАВИЛА.</div>
               <h1>{tabs.find((t) => t.id === page)?.name}</h1>
@@ -255,7 +275,10 @@ function App() {
                 {
                   {
                     home: "Надёжное соединение начинается с понятных деталей.",
-                    profiles: "Личные серверы и подписки в одном месте.",
+                    selfhost:
+                      "Настройте свой VPN и управляйте доступом устройств.",
+                    sui: "Клиенты и профили вашей установленной S-UI.",
+                    profiles: "Профили и подписки для подключения к VPN.",
                     logs: "Что происходит с подключением — без догадок.",
                     api: "Управляйте Corepass из скриптов и других приложений.",
                     router: "Тот же сервер — для устройств во всём доме.",
@@ -265,7 +288,7 @@ function App() {
               </p>
             </div>
             <span className="release">
-              NEXT <span>0.3.0</span>
+              NEXT <span>0.4 PREVIEW</span>
             </span>
           </div>
           {!native && (
@@ -304,6 +327,34 @@ function App() {
               </button>
             </div>
           )}
+          <div hidden={page !== "selfhost"}>
+            <SelfHost
+              active={page === "selfhost"}
+              onImport={(uri) =>
+                command(
+                  "/v1/profiles/import",
+                  { uri },
+                  "Профиль добавлен в подключения",
+                )
+              }
+              onNotice={setNotice}
+              onBusyChange={setServerBusy}
+            />
+          </div>
+          <div hidden={page !== "sui"}>
+            <SuiPanel
+              active={page === "sui"}
+              onImport={(uri) =>
+                command(
+                  "/v1/profiles/import",
+                  { uri },
+                  "Профиль добавлен в подключения",
+                )
+              }
+              onNotice={setNotice}
+              onBusyChange={setSuiBusy}
+            />
+          </div>
           {page === "home" && (
             <>
               <div className="home-grid">
@@ -323,7 +374,9 @@ function App() {
                             : "Не подключено"}
                     </span>
                   </div>
-                  <div className={`power-stage ${verified ? "on" : ""}`}>
+                  <div
+                    className={`power-stage ${verified ? "on" : ""} ${status.state === "connecting" ? "is-connecting" : ""}`}
+                  >
                     <div className="orbit one" />
                     <div className="orbit two" />
                     <div className="orbit-dot" />
@@ -926,7 +979,7 @@ function App() {
               <Lock size={12} />
               Локальное управление · без телеметрии
             </div>
-            <span>COREPASS NEXT / 0.3</span>
+            <span>COREPASS NEXT / 0.4 PREVIEW</span>
           </footer>
         </div>
       </main>
@@ -997,7 +1050,7 @@ function App() {
             />
             <div className="note">
               <Lock size={15} />
-              Ссылка остаётся на этом компьютере.
+              Ссылка хранится локально.
             </div>
             <div className="modal-actions">
               <button
@@ -1037,7 +1090,7 @@ function App() {
 }
 function RouteArt({ connected }: { connected: boolean }) {
   return (
-    <div className="map-art">
+    <div className={`map-art ${connected ? "active" : ""}`}>
       <svg viewBox="0 0 400 150" aria-hidden="true">
         <defs>
           <pattern

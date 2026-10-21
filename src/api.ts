@@ -47,7 +47,7 @@ export type Status = {
 export const native =
   typeof window !== "undefined" && Boolean("__TAURI_INTERNALS__" in window);
 export const initial: Status = {
-  version: "0.3.0",
+  version: "0.4.0-preview.1",
   state: "disconnected",
   message: "Готов к подключению",
   busy: false,
@@ -81,6 +81,17 @@ export async function api<T>(
       if (path === "/v1/status") return initial as T;
       if (path === "/v1/profiles") return { profiles: [] } as T;
       if (path === "/v1/logs") return { events: [] } as T;
+      if (path === "/v1/sui/panels")
+        return { panels: [], supported: true } as T;
+      if (path === "/v1/settings")
+        return { minimize_to_tray: true, mode: "system" } as T;
+      if (path === "/v1/servers")
+        return {
+          servers: [],
+          supported: true,
+          busy: false,
+          feature: "preview",
+        } as T;
     }
     throw new Error(
       "Это предпросмотр интерфейса. Откройте настольное приложение.",

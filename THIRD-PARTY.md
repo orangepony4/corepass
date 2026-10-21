@@ -8,6 +8,9 @@ Corepass is an independent controller and UI. It does not modify the VPN engine.
 - **Tauri 2 / Wry / Tao**: MIT or Apache-2.0; https://github.com/tauri-apps/tauri
 - **React**: MIT; https://github.com/facebook/react
 - **Lucide icons**: ISC; https://github.com/lucide-icons/lucide
+- **russh**: Apache-2.0; SSH client library, https://github.com/Eugeny/russh. Locked versions and cryptographic dependency licenses are recorded in Cargo.lock.
+- **qrcode.react**: ISC; local QR rendering, https://github.com/zpao/qrcode.react.
+- **Caddy with Naive forwardproxy v2.11.7-naive**: downloaded on the VPS only during explicit installation; upstream [release and source](https://github.com/klzgrad/forwardproxy/releases/tag/v2.11.7-naive). The upstream archive's LICENSE and README accompany the installed binary. Corepass pins the archive SHA256 and does not alter the binary.
 - **Rust dependencies**: versions recorded in Cargo.lock; their upstream license notices apply.
 
 Router engine images contain the same unmodified upstream Linux-musl executable, stored in a read-only compressed SquashFS image. Corepass scripts, UI and original source are MIT; the engine remains under its own license.
